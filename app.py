@@ -8,6 +8,7 @@ import dateutil.parser
 import json
 import datetime
 
+import unidecode
 import re
 
 from twilio.rest import Client
@@ -67,7 +68,10 @@ def query_overpass(query):
     global overpass_index
     # to be used with following query
     # curl -X POST -F 'Body=Walk from 156 avenue loubet, dunkerque to 168 avenue de la libération' localhost:5000
-    recorded_results = ['overpass_query_18:00:34.313883.json', 'overpass_query_18:00:51.380400.json', 'overpass_query_20:03:23.125522.json']
+    # recorded_results = ['overpass_query_18:00:34.313883.json', 'overpass_query_18:00:51.380400.json', 'overpass_query_20:03:23.125522.json']
+    # curl -X POST -F 'Body=Walk from 41 rue joseph jacquard, dunkerque to 52 rue pierre et marie curie' localhost:5000
+    recorded_results = ['overpass_query_17:47:21.136546.json', 'overpass_query_17:47:45.812696.json', 'overpass_query_17:47:48.224438.json']
+    # recorded_results = []
     if overpass_index < len(recorded_results):
         with open(recorded_results[overpass_index]) as json_file:
             result = json.load(json_file)
@@ -141,7 +145,7 @@ def get_query_for_map(pointA, pointB):
     return f"""
     [out:json];    
     (
-      way[highway][foot=yes](around:{1000*distance*0.6*2},{midpoint['lat']},{midpoint['lon']});
+      way[highway][foot=yes](around:{1000*distance*0.6},{midpoint['lat']},{midpoint['lon']});
       way[highway~"^(footway|path|pedestrian)$"](around:{distance*0.6},{midpoint['lat']},{midpoint['lon']});
     );
     (._;>;);
@@ -171,9 +175,8 @@ def get_flying_distance(point1, point2):
     distance = R * c
     return distance
 
-# to the equator I think
+# to the equator I think, and the proper term is bearing
 def _get_angle(point1, point2):
-    print(get_flying_distance(point1, point2))
     lat1 = radians(point1['lat'])
     lon1 = radians(point1['lon'])
     lat2 = radians(point2['lat'])
@@ -186,11 +189,12 @@ def _get_angle(point1, point2):
 
     brng = math.atan2(y, x);
 
+    brng = 180*brng/math.pi
+
     brng = brng % 360;
 
-    print(brng)
-
     return brng;
+
 
 def get_angle(point1, point2, point3):
     return (_get_angle(point1, point2) - 180 - _get_angle(point2, point3)) % 360
@@ -200,6 +204,36 @@ def get_midpoint(point1, point2):
        'lat': (point1['lat'] + point2['lat'])/2.,
        'lon': (point1['lon'] + point2['lon'])/2.
     }
+
+# here we do simple stuff
+# we do not try to solve tediously difficult problems on spheres or ellispoids
+def get_projection_on_segment(point, segment):
+    segpoint1 = segment[0]
+    segpoint2 = segment[1]
+    
+    # project on plane tangent of earth at point (at least that's what I'm trying to do)
+    proj1 = [
+        radians(segpoint1['lat']) - radians(point['lat']),
+        math.cos(radians(point['lat'])) * (radians(segpoint1['lon']) - radians(point['lon']))
+    ]
+    proj2 = [
+        radians(segpoint2['lat']) - radians(point['lat']),
+        math.cos(radians(point['lat'])) * (radians(segpoint2['lon']) - radians(point['lon']))
+    ]
+    
+    # find the projection
+    t = ((proj2[0] - proj1[0])*proj2[0] + (proj2[1] - proj1[1])*proj2[1]) / ((proj1[0] - proj2[0])**2 + (proj1[1] - proj2[1])**2)
+    if t > 1:
+        t = 1
+    if t < 0:
+        t = 0
+
+    projection = {
+        'lat': t * segpoint1['lat'] + (1-t) * segpoint2['lat'],
+        'lon': t * segpoint1['lon'] + (1-t) * segpoint2['lon']
+    }
+
+    return projection
 
 ##################### itinerary ######################
 
@@ -219,36 +253,37 @@ def compute_neighbors(nodes, ways, pointA, pointB):
                 node2['neighbors'].append({'distance': distance, 'node': node1, 'way': way['id']})
             else:
                 node2['neighbors'] = [{'distance': distance, 'node': node1, 'way': way['id']}]
-    foundSource = False
-    foundTarget = False    
-    for node in list(nodes.values()):
-        if node['id'] == pointA['id']:
-            pointA['neighbors'] = node['neighbors']
-            node['isSource'] = True
-            foundSource = True
-            source = pointA
-    for node in list(nodes.values()):
-        if node['id'] == pointB['id']:
-            node['isTarget'] = True
-            foundTarget = True
-    if not foundSource:
-        _min = 10
-        for node in list(nodes.values()):
-            d = get_flying_distance(node, pointA)
+    
+    # locate source
+    _min = 10
+    for way in list(ways.values()):
+        for i in range(1, len(way['nodes'])):
+            node1Id = way['nodes'][i-1]
+            node2Id = way['nodes'][i]
+            node1 = nodes[node1Id]
+            node2 = nodes[node2Id]
+            projection = get_projection_on_segment(pointA, [node1, node2])
+            d = get_flying_distance(projection, pointA)
             if d < _min:
                 _min = d
-                _argmin = node
-        _argmin['isSource'] = True
-        pointA['neighbors'] = _argmin['neighbors']
-        source = _argmin
-    if not foundTarget:
-        _min = 10
-        for node in list(nodes.values()):
-            d = get_flying_distance(node, pointB)
-            if d < _min:
-                _min = d
-                _argmin = node
-        _argmin['isTarget'] = True
+                _argmin = projection
+                _argmin['neighbors'] = [
+                    {'distance': get_flying_distance(projection, node1), 'node': node1, 'way': way['id']},
+                    {'distance': get_flying_distance(projection, node2), 'node': node2, 'way': way['id']}
+                ]
+    source = _argmin
+    source['isSource'] = True
+    source['id'] = 0
+    print('found source at distance ' + str(_min))
+
+    # locate target
+    _min = 10
+    for node in list(nodes.values()):
+        d = get_flying_distance(node, pointB)
+        if d < _min:
+            _min = d
+            _argmin = node
+    _argmin['isTarget'] = True
      
     return source
 
@@ -297,8 +332,9 @@ def get_actual_directions(path, nodes, ways, pointA):
         way = ways[link['way']]
         name = way['tags']['name'] if 'name' in way['tags'] else way['tags']['highway']
         if len(directions) == 0 or directions[-1]['way'] != name:
-            print(name)
             angle = get_angle(previous_node, node1, node2)
+            angle = (360 - angle) % 360
+            angle -= 180
             directions.append({'way': name, 'angle': angle ,'distance': link['distance']})
         else:
             directions[-1]['distance'] += link['distance']
@@ -308,13 +344,12 @@ def get_actual_directions(path, nodes, ways, pointA):
 
 def dijkstra(map_data, pointA, pointB):
     elements = map_data['elements']
-    print(len(elements))
+    print('nb of elements is ' + str(len(elements)))
     nodes = {x['id']: x for x in elements if x['type'] == 'node'}
-    print(len(nodes))
+    print('nb of nodes is ' + str(len(nodes)))
     ways = {x['id']: x for x in elements if x['type'] == 'way'}
-    print(len(ways))
+    print('nb of ways is ' + str(len(ways)))
     source = compute_neighbors(nodes, ways, pointA, pointB)
-    print(get_flying_distance(source, pointA))
     pointA['isSource'] = True
     markings = {};
     distances = PriorityQueue()
@@ -334,11 +369,18 @@ def dijkstra(map_data, pointA, pointB):
     return {'distance': 0, 'directions': []}
 
 MAX_FLYING_DISTANCE = 30
+MAX_CHARS_PER_WAY = 20
 
 def get_message_from_itinerary(itinerary):
-    result = 'Distance: ' + str(round(itinerary['distance'], 2)) + ';'
+    result = 'Distance: ' + str(round(itinerary['distance'], 2)) + 'km;'
     for part in itinerary['directions']:
-         result += '\n' + str(round(part['angle'])) + 'd, ' + part['way'] + ', ' + str(round(part['distance'], 2)) + 'km;'
+        way_name = (part['way'].replace('Boulevard', 'Bv.')
+                              .replace('Avenue', 'Av.')
+                              .replace('Rue', 'R.')
+        )
+        way_name = unidecode.unidecode(way_name[:MAX_CHARS_PER_WAY])
+        distance_str = str(round(part['distance']*1000)) + 'm;' if part['distance'] < 1 else str(round(part['distance'], 2)) + 'km;'
+        result += '\n' + str(round(part['angle'])) + 'd, ' + way_name + ', ' + distance_str
     return result
 
 def get_walking_itinerary(nA, wayA, cityA, nB, wayB, cityB):

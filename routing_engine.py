@@ -1,5 +1,11 @@
 from queue import PriorityQueue
 from geometry_utils import get_flying_distance, get_projection_on_segment, get_angle
+import constants
+import math
+
+def get_required_sms_number(character_count):
+    return math.ceil(
+        (character_count - constants.TWILIO_MESSAGE_CHARACTER_COUNT) / float(constants.MAX_SMS_CHARACTER_COUNT))
 
 def compute_neighbors(nodes, ways, pointA, pointB):
     for way in list(ways.values()):
@@ -53,35 +59,37 @@ def compute_neighbors(nodes, ways, pointA, pointB):
      
     return source
 
+def get_way_name(way):
+    return way['tags']['name'] if 'name' in way['tags'] else way['tags']['highway']
+
 def have_same_name(way1, way2):
-    name1 = way1['tags']['name'] if 'name' in way1['tags'] else way1['tags']['highway'] 
-    name2 = way2['tags']['name'] if 'name' in way2['tags'] else way2['tags']['highway']
-    return name1 == name2
+    return get_way_name(way1) == get_way_name(way2)
 
 def mark_next_point(ways, prioque, markings):
-    distanceToA, node, predecessor, preceding_way = prioque.get()
+    distanceToA, node, predecessor, preceding_way, sms_character_count = prioque.get()
     if node['id'] in markings:
-        return None
+        return None, None
     # print(distanceToA)
     node['distance'] = distanceToA
     node['predecessor'] = predecessor
     node['preceding_way'] = preceding_way
-    directions_count = predecessor['directions_count'] if predecessor else 0
-    if preceding_way and predecessor and predecessor['preceding_way']\
-       and not have_same_name(ways[preceding_way], ways[predecessor['preceding_way']]):
-        directions_count += 1
-    node['directions_count'] = directions_count
+    #directions_count = predecessor['directions_count'] if predecessor else 0
+    #if preceding_way and predecessor and predecessor['preceding_way']\
+    #   and not have_same_name(ways[preceding_way], ways[predecessor['preceding_way']]):
+    #    directions_count += 1
+    #node['directions_count'] = directions_count
 
     for link in node['neighbors']:
         if predecessor and link['node']['id'] == predecessor['id']:
             continue
-        directions_count = node['directions_count']
+        new_sms_character_count = sms_character_count
         if preceding_way and not have_same_name(ways[preceding_way], ways[link['way']]):
-            directions_count += 1
-        prioque.put((distanceToA + link['distance'], link['node'], node, link['way']))
+            new_sms_character_count += constants.ITINERARY_BASE_DIRECTION_CHARACTER_COUNT
+            new_sms_character_count += min(constants.MAX_CHARS_PER_WAY, len(get_way_name(ways[preceding_way])))
+        prioque.put((distanceToA + link['distance'], link['node'], node, link['way'], new_sms_character_count))
 
     markings[node['id']] = True
-    return node
+    return node, sms_character_count
 
 def get_node_path(node):
     if node['predecessor'] and node['predecessor']['id'] == node['id']:
@@ -132,14 +140,15 @@ def dijkstra(map_data, pointA, pointB):
     pointA['isSource'] = True
     markings = {}
     prioque = PriorityQueue()
-    prioque.put((0, source, None, None))
+    prioque.put((0, source, None, None, constants.ITINERARY_DISTANCE_CHARACTER_COUNT))
     while not prioque.empty():
-        node = mark_next_point(ways, prioque, markings)
+        node, sms_character_count = mark_next_point(ways, prioque, markings)
         if node and 'isTarget' in node:
             print('path was found')
             distance = node['distance']
             print(distance)
-            print(node['directions_count'])
+            print(sms_character_count, ' characters')
+            print(get_required_sms_number(sms_character_count), ' is the required number of sms')
             path = get_node_path(node)
             return {
                 'distance': distance,

@@ -28,18 +28,18 @@ def _get_angle(point1, point2):
     lat2 = radians(point2['lat'])
     lon2 = radians(point2['lon'])
     
-    dLon = (lon2 - lon1);
+    dLon = (lon2 - lon1)
 
-    y = math.sin(dLon) * math.cos(lat2);
-    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dLon);
+    y = math.sin(dLon) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dLon)
 
-    brng = math.atan2(y, x);
+    brng = math.atan2(y, x)
 
     brng = 180*brng/math.pi
 
-    brng = brng % 360;
+    brng = brng % 360
 
-    return brng;
+    return brng
 
 
 def get_angle(point1, point2, point3):
@@ -52,7 +52,7 @@ def get_midpoint(point1, point2):
     }
 
 # here we do simple stuff
-# we do not try to solve tediously difficult problems on spheres or ellispoids
+# we do not try to solve tediously difficult problems on spheres or ellipsoids
 def get_projection_on_segment(point, segment):
     segpoint1 = segment[0]
     segpoint2 = segment[1]

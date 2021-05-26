@@ -1,11 +1,20 @@
+from dataclasses import dataclass, field
 from queue import PriorityQueue
 from geometry_utils import get_flying_distance, get_projection_on_segment, get_angle
 import constants
 import math
 
+@dataclass(order=True)
+class PrioritizedItem:
+    priority: int
+    item: object = field()
+
 def get_required_sms_number(character_count):
     return math.ceil(
         (character_count - constants.TWILIO_MESSAGE_CHARACTER_COUNT) / float(constants.MAX_SMS_CHARACTER_COUNT))
+
+def get_cost(distance, character_count):
+    return get_required_sms_number(character_count) * constants.SMS_TO_METER_PREFERENCE + distance
 
 def compute_neighbors(nodes, ways, pointA, pointB):
     for way in list(ways.values()):
@@ -26,7 +35,9 @@ def compute_neighbors(nodes, ways, pointA, pointB):
             else:
                 node2['neighbors'] = [node1_as_neighbor]
     
-    # locate source
+    # locate source. It is the projection of pointA on the closest way.
+    # the nearest node of the nearest way could be dozens of meters away
+    # in either direction so it would be impractical to use it
     _min = 10
     for way in list(ways.values()):
         for i in range(1, len(way['nodes'])):
@@ -66,7 +77,7 @@ def have_same_name(way1, way2):
     return get_way_name(way1) == get_way_name(way2)
 
 def mark_next_point(ways, prioque, markings):
-    distanceToA, node, predecessor, preceding_way, sms_character_count = prioque.get()
+    distanceToA, node, predecessor, preceding_way, sms_character_count = prioque.get().item
     if node['id'] in markings:
         return None, None
     # print(distanceToA)
@@ -86,7 +97,9 @@ def mark_next_point(ways, prioque, markings):
         if preceding_way and not have_same_name(ways[preceding_way], ways[link['way']]):
             new_sms_character_count += constants.ITINERARY_BASE_DIRECTION_CHARACTER_COUNT
             new_sms_character_count += min(constants.MAX_CHARS_PER_WAY, len(get_way_name(ways[preceding_way])))
-        prioque.put((distanceToA + link['distance'], link['node'], node, link['way'], new_sms_character_count))
+        new_distance = distanceToA + link['distance']
+        priority = get_cost(new_distance, new_sms_character_count)
+        prioque.put(PrioritizedItem(priority, (new_distance, link['node'], node, link['way'], new_sms_character_count)))
 
     markings[node['id']] = True
     return node, sms_character_count
@@ -140,7 +153,7 @@ def dijkstra(map_data, pointA, pointB):
     pointA['isSource'] = True
     markings = {}
     prioque = PriorityQueue()
-    prioque.put((0, source, None, None, constants.ITINERARY_DISTANCE_CHARACTER_COUNT))
+    prioque.put(PrioritizedItem(0, (0, source, None, None, constants.ITINERARY_DISTANCE_CHARACTER_COUNT)))
     while not prioque.empty():
         node, sms_character_count = mark_next_point(ways, prioque, markings)
         if node and 'isTarget' in node:

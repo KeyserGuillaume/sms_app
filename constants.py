@@ -15,3 +15,6 @@ ITINERARY_DISTANCE_CHARACTER_COUNT = 17
 
 # how many characters we take to write direction and distance to cover before next
 ITINERARY_BASE_DIRECTION_CHARACTER_COUNT= 13
+
+# how many kilometers I am ready to walk to save one sms
+SMS_TO_METER_PREFERENCE = 0.1

@@ -22,7 +22,7 @@ class PrioritizedItem:
 
 def get_required_sms_number(character_count):
     return math.ceil(
-        (character_count - constants.TWILIO_MESSAGE_CHARACTER_COUNT) / float(constants.MAX_SMS_CHARACTER_COUNT))
+        (character_count + constants.TWILIO_MESSAGE_CHARACTER_COUNT) / float(constants.MAX_SMS_CHARACTER_COUNT))
 
 def get_way_name(way):
     return way['tags']['name'] if 'name' in way['tags'] else way['tags']['highway']

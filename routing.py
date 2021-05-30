@@ -1,8 +1,8 @@
 import unidecode
 import re
-from overpass_api import get_street_location, get_map_between_points
+from overpass_api import get_street_location, get_map_between_points, get_full_map_between_points
 from geometry_utils import get_flying_distance
-from routing_engine import dijkstra, get_required_sms_number
+from routing_engine import RoutingEngine, get_required_sms_number
 import constants
 
 
@@ -19,6 +19,20 @@ def get_message_from_itinerary(itinerary):
     print(get_required_sms_number(len(result)), ' is the real required number of sms')
     return result
 
+def routing_engine_wrapper(map_data, pointA, pointB):
+    engine = RoutingEngine(False, 0)
+    itinerary = engine.dijkstra(map_data, pointA, pointB)
+    if itinerary['distance'] == 0:
+        return ''
+    msg = get_message_from_itinerary(itinerary)
+    if get_required_sms_number(len(msg)) <= 2:
+        return msg
+    else:
+        engine = RoutingEngine(True, constants.SMS_TO_METER_PREFERENCE)
+        itinerary = engine.dijkstra(map_data, pointA, pointB)
+        msg = get_message_from_itinerary(itinerary)
+        return msg
+
 def get_walking_itinerary(nA, wayA, cityA, nB, wayB, cityB):
     pointA = get_street_location(nA, wayA, cityA)
     pointB = get_street_location(nB, wayB, cityB)
@@ -29,10 +43,13 @@ def get_walking_itinerary(nA, wayA, cityA, nB, wayB, cityB):
     if distance > constants.MAX_FLYING_DISTANCE:
         return ''
     map_data = get_map_between_points(pointA, pointB)
-    itinerary = dijkstra(map_data, pointA, pointB)
-    if itinerary['distance'] == 0:   
-        return ''
-    return get_message_from_itinerary(itinerary)
+    msg = routing_engine_wrapper(map_data, pointA, pointB)
+    if msg == '':   
+        map_data = get_full_map_between_points(pointA, pointB)
+        msg = routing_engine_wrapper(map_data, pointA, pointB)
+        return msg
+    else:
+        return msg
     
 
 def get_walking_itinerary_response(request):

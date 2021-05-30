@@ -6,24 +6,26 @@ from geometry_utils import get_flying_distance, get_midpoint
 
 overpass_index = 0
 def query_overpass(query):
-    # temporary hack used for manual tests
+    # temporary hacks used for manual tests
     global overpass_index
     # to be used with following query
     # curl -X POST -F 'Body=Walk from 156 avenue loubet, dunkerque to 168 avenue de la libération' localhost:5000
     # recorded_results = ['overpass_query_18:00:34.313883.json', 'overpass_query_18:00:51.380400.json', 'overpass_query_20:03:23.125522.json']
     # curl -X POST -F 'Body=Walk from 41 rue joseph jacquard, dunkerque to 52 rue pierre et marie curie' localhost:5000
     # recorded_results = ['overpass_query_17:47:21.136546.json', 'overpass_query_17:47:45.812696.json', 'overpass_query_17:47:48.224438.json']
+    # request in paris to 5 av republique
+    # recorded_results = ['overpass_query_17:59:02.245797.json', 'overpass_query_17:59:15.354684.json', 'overpass_query_17:59:16.072067.json', 'overpass_query_18:25:19.209103.json']
     recorded_results = []
     if overpass_index < len(recorded_results):
         with open(recorded_results[overpass_index]) as json_file:
             result = json.load(json_file)
         overpass_index += 1
         return result
-    overpass_url = "http://overpass-api.de/api/interpreter";
+    overpass_url = "http://overpass-api.de/api/interpreter"
     response = requests.get(overpass_url, params={'data': query})
     data = response.json()
-    with open(f'overpass_query_{str(datetime.datetime.now().time())}.json', 'w') as outfile:
-        json.dump(data, outfile)
+    # with open(f'overpass_query_{str(datetime.datetime.now().time())}.json', 'w') as outfile:
+    #     json.dump(data, outfile)
     return data
 
 def prepare_letter_for_regex(letter, capitalize):
@@ -87,7 +89,7 @@ def get_map_between_points(pointA, pointB):
     distance = get_flying_distance(pointA, pointB)
     midpoint = get_midpoint(pointA, pointB)
     map_query = f"""
-    [out:json];    
+    [out:json];
     (
       way[highway][foot=yes](around:{1000*distance*0.6},{midpoint['lat']},{midpoint['lon']});
       way[highway~"^(footway|path|pedestrian)$"](around:{distance*0.6},{midpoint['lat']},{midpoint['lon']});
@@ -99,3 +101,18 @@ def get_map_between_points(pointA, pointB):
     map_data = query_overpass(map_query)
     return map_data
 
+def get_full_map_between_points(pointA, pointB):
+    distance = get_flying_distance(pointA, pointB)
+    midpoint = get_midpoint(pointA, pointB)
+    map_query = f"""
+    [out:json];
+    (
+      way[highway][foot=yes](around:{1000*distance*0.6},{midpoint['lat']},{midpoint['lon']});
+      way[highway][name](around:{1000*distance*0.6},{midpoint['lat']},{midpoint['lon']});
+      way[highway~"^(footway|path|pedestrian)$"](around:{distance*0.6},{midpoint['lat']},{midpoint['lon']});
+    );
+    (._;>;);
+    out;
+    """
+    map_data = query_overpass(map_query)
+    return map_data

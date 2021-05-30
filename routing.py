@@ -2,7 +2,7 @@ import unidecode
 import re
 from overpass_api import get_street_location, get_map_between_points
 from geometry_utils import get_flying_distance
-from routing_engine import dijkstra
+from routing_engine import dijkstra, get_required_sms_number
 import constants
 
 
@@ -16,6 +16,7 @@ def get_message_from_itinerary(itinerary):
         way_name = unidecode.unidecode(way_name[:constants.MAX_CHARS_PER_WAY])
         distance_str = str(round(part['distance']*1000)) + 'm;' if part['distance'] < 1 else str(round(part['distance'], 2)) + 'km;'
         result += '\n' + str(round(part['angle'])) + 'd, ' + way_name + ', ' + distance_str
+    print(get_required_sms_number(len(result)), ' is the real required number of sms')
     return result
 
 def get_walking_itinerary(nA, wayA, cityA, nB, wayB, cityB):

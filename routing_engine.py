@@ -1,19 +1,30 @@
 from dataclasses import dataclass, field
 from queue import PriorityQueue
-from geometry_utils import get_flying_distance, get_projection_on_segment, get_angle
+from geometry_utils import get_flying_distance, get_projection_on_segment, get_angle, get_bearing_at_node
 import constants
 import math
 
+class Marking:
+    def __init__(self, node_id, distance_from_A, sms_character_count, preceding_marking, preceding_way):
+        self.node_id = node_id                        # int
+        self.distance_from_A = distance_from_A         # float
+        self.sms_character_count = sms_character_count # int
+        self.preceding_marking = preceding_marking     # Mark
+        self.preceding_way = preceding_way              # int
+
+    def __gt__(self, other):
+        return self.node_id > other.node_id
+
 @dataclass(order=True)
 class PrioritizedItem:
-    priority: int
+    score: int
     item: object = field()
 
 def get_required_sms_number(character_count):
     return math.ceil(
         (character_count - constants.TWILIO_MESSAGE_CHARACTER_COUNT) / float(constants.MAX_SMS_CHARACTER_COUNT))
 
-def get_cost(distance, character_count):
+def get_score(distance, character_count):
     return get_required_sms_number(character_count) * constants.SMS_TO_METER_PREFERENCE + distance
 
 def compute_neighbors(nodes, ways, pointA, pointB):
@@ -58,6 +69,7 @@ def compute_neighbors(nodes, ways, pointA, pointB):
     source['isSource'] = True
     source['id'] = 0
     print('found source at distance ' + str(_min))
+    nodes[0] = source
 
     # locate target
     _min = 10
@@ -76,44 +88,55 @@ def get_way_name(way):
 def have_same_name(way1, way2):
     return get_way_name(way1) == get_way_name(way2)
 
-def mark_next_point(ways, prioque, markings):
-    distanceToA, node, predecessor, preceding_way, sms_character_count = prioque.get().item
-    if node['id'] in markings:
-        return None, None
-    # print(distanceToA)
-    node['distance'] = distanceToA
-    node['predecessor'] = predecessor
-    node['preceding_way'] = preceding_way
-    #directions_count = predecessor['directions_count'] if predecessor else 0
-    #if preceding_way and predecessor and predecessor['preceding_way']\
-    #   and not have_same_name(ways[preceding_way], ways[predecessor['preceding_way']]):
-    #    directions_count += 1
-    #node['directions_count'] = directions_count
+def should_write_line(previous_way, next_way, node, nodes):
+    previous_name = get_way_name(previous_way)
+    next_name = get_way_name(next_way)
+    write_line = previous_name != next_name
+    if write_line:
+        if get_way_name(previous_way) not in constants.DIFFICULT_WAYS:
+            bearing_before = get_bearing_at_node(previous_way, node, nodes)
+            bearing_after = get_bearing_at_node(next_way, node, nodes)
+            write_line = bearing_before is None or bearing_after is None \
+                or abs(bearing_after - bearing_before) > constants.PARALLELISM_TOLERANCE
+    return write_line
 
+def mark_next_point(nodes, ways, prioque, markings):
+    marking = prioque.get().item
+    mark_id = str(marking.node_id) + '-' + str(marking.preceding_way) if marking.preceding_way is not None else str(marking.node_id)
+    if mark_id in markings:
+        return None
+
+    node = nodes[marking.node_id]
     for link in node['neighbors']:
-        if predecessor and link['node']['id'] == predecessor['id']:
+        # no going backwards to node of previous mark
+        if marking.preceding_marking and link['node']['id'] == marking.preceding_marking.node_id:
             continue
-        new_sms_character_count = sms_character_count
-        if preceding_way and not have_same_name(ways[preceding_way], ways[link['way']]):
+        new_sms_character_count = marking.sms_character_count
+        if marking.preceding_way and should_write_line(ways[marking.preceding_way], ways[link['way']], node, nodes):
             new_sms_character_count += constants.ITINERARY_BASE_DIRECTION_CHARACTER_COUNT
-            new_sms_character_count += min(constants.MAX_CHARS_PER_WAY, len(get_way_name(ways[preceding_way])))
-        new_distance = distanceToA + link['distance']
-        priority = get_cost(new_distance, new_sms_character_count)
-        prioque.put(PrioritizedItem(priority, (new_distance, link['node'], node, link['way'], new_sms_character_count)))
+            new_sms_character_count += min(
+                constants.MAX_CHARS_PER_WAY,
+                len(get_way_name(ways[marking.preceding_way])))
+        new_distance = marking.distance_from_A + link['distance']
+        score = get_score(new_distance, new_sms_character_count)
+        new_marking = Marking(link['node']['id'], new_distance, new_sms_character_count, marking, link['way'])
+        prioque.put(PrioritizedItem(score, new_marking))
 
-    markings[node['id']] = True
-    return node, sms_character_count
+    markings[mark_id] = marking
+    return marking
 
-def get_node_path(node):
-    if node['predecessor'] and node['predecessor']['id'] == node['id']:
-        print('pb')
+def get_node_path(marking, nodes):
     path = []
-    current_node = node
+    current_node = nodes[marking.node_id]
     i = 0
-    while current_node and 'isSource' not in current_node and current_node['predecessor'] and i <= 1000:
-        current_node = current_node['predecessor']
+    current_marking = marking
+    while current_node and 'isSource' not in current_node and i < 1000:
+        if current_marking.preceding_marking is None:
+            break
+        current_node = nodes[current_marking.preceding_marking.node_id]
+        current_marking = current_marking.preceding_marking
         path.append(current_node)
-        i+=1
+        i+=1 
     if i == 1000:
         print('big trouble')
     if 'isSource' not in current_node:
@@ -122,25 +145,26 @@ def get_node_path(node):
     print(f'path has length {len(path)}')
     return path[::-1]
 
-def get_actual_directions(path, ways, pointA):
+def get_actual_directions(path, ways, nodes, pointA):
     directions = []
     previous_node = pointA
+    previous_way = None
     for i in range(1, len(path)):
         node1 = path[i-1]
         node2 = path[i]
         link = [n for n in node1['neighbors'] if n['node']['id'] == node2['id']][0]
         way = ways[link['way']]
-        name = way['tags']['name'] if 'name' in way['tags'] else way['tags']['highway']
-        if len(directions) == 0 or directions[-1]['way'] != name:
+        name = get_way_name(way)
+        if len(directions) == 0 or (previous_way is not None and should_write_line(previous_way, way, node1, nodes)):
             angle = get_angle(previous_node, node1, node2)
             angle = (360 - angle) % 360
             angle -= 180
-            directions.append({'way': name, 'angle': angle ,'distance': link['distance']})
+            directions.append({'way': name, 'angle': angle ,'distance': get_flying_distance(node1, node1)})
         else:
-            directions[-1]['distance'] += link['distance']
+            directions[-1]['distance'] += get_flying_distance(node1, node2)
         previous_node = node1
+        previous_way = way
     return directions
-
 
 def dijkstra(map_data, pointA, pointB):
     elements = map_data['elements']
@@ -153,19 +177,20 @@ def dijkstra(map_data, pointA, pointB):
     pointA['isSource'] = True
     markings = {}
     prioque = PriorityQueue()
-    prioque.put(PrioritizedItem(0, (0, source, None, None, constants.ITINERARY_DISTANCE_CHARACTER_COUNT)))
+    first_marking = Marking(source['id'], 0, constants.ITINERARY_DISTANCE_CHARACTER_COUNT, None, None)
+    prioque.put(PrioritizedItem(0, first_marking))
     while not prioque.empty():
-        node, sms_character_count = mark_next_point(ways, prioque, markings)
-        if node and 'isTarget' in node:
+        marking = mark_next_point(nodes, ways, prioque, markings)
+        if marking and marking.node_id and 'isTarget' in nodes[marking.node_id]:
             print('path was found')
-            distance = node['distance']
+            distance = marking.distance_from_A
             print(distance)
-            print(sms_character_count, ' characters')
-            print(get_required_sms_number(sms_character_count), ' is the required number of sms')
-            path = get_node_path(node)
+            print(marking.sms_character_count, ' characters')
+            print(get_required_sms_number(marking.sms_character_count), ' is the required number of sms')
+            path = get_node_path(marking, nodes)
             return {
                 'distance': distance,
-                'directions': get_actual_directions(path, ways, pointA)
+                'directions': get_actual_directions(path, ways, nodes, pointA)
             }
     print('Path not found')
     return {'distance': 0, 'directions': []}

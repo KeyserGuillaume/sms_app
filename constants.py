@@ -17,4 +17,12 @@ ITINERARY_DISTANCE_CHARACTER_COUNT = 17
 ITINERARY_BASE_DIRECTION_CHARACTER_COUNT= 13
 
 # how many kilometers I am ready to walk to save one sms
-SMS_TO_METER_PREFERENCE = 0.1
+SMS_TO_METER_PREFERENCE = 0.3
+
+# in degrees
+PARALLELISM_TOLERANCE = 20
+
+# in km
+MIN_DISTANCE_FOR_WAY_BEARING = 0.02
+
+DIFFICULT_WAYS = ['path', 'cycleway', 'chemin']

@@ -1,4 +1,5 @@
 import math
+import constants
 
 def radians(x):
     return math.pi*x/180.
@@ -21,8 +22,8 @@ def get_flying_distance(point1, point2):
     distance = R * c
     return distance
 
-# to the equator I think, and the proper term is bearing
-def _get_angle(point1, point2):
+# to the equator I think
+def get_bearing(point1, point2):
     lat1 = radians(point1['lat'])
     lon1 = radians(point1['lon'])
     lat2 = radians(point2['lat'])
@@ -43,7 +44,7 @@ def _get_angle(point1, point2):
 
 
 def get_angle(point1, point2, point3):
-    return (_get_angle(point1, point2) - 180 - _get_angle(point2, point3)) % 360
+    return (get_bearing(point1, point2) - 180 - get_bearing(point2, point3)) % 360
 
 def get_midpoint(point1, point2):
     return {
@@ -80,3 +81,37 @@ def get_projection_on_segment(point, segment):
     }
 
     return projection
+
+def get_half_bearing_at_node(nodes_forming_way, nodes):
+    sum_d = 0
+    i = 0
+    sum_bearing = 0
+    while sum_d < constants.MIN_DISTANCE_FOR_WAY_BEARING and i < len(nodes_forming_way) - 1:
+        d = get_flying_distance(nodes[nodes_forming_way[i]], nodes[nodes_forming_way[i+1]])
+        sum_d += d
+        sum_bearing += d*get_bearing(nodes[nodes_forming_way[i]], nodes[nodes_forming_way[i+1]])
+        i += 1
+    if sum_d < constants.MIN_DISTANCE_FOR_WAY_BEARING:
+        return None
+    else:
+        return sum_bearing/sum_d % 180
+
+def get_bearing_at_node(way, node, nodes):
+    index = way['nodes'].index(node['id'])
+    if index == 0:
+        return get_half_bearing_at_node(way['nodes'], nodes)
+    elif index == len(way['nodes']) - 1:
+        return get_half_bearing_at_node(way['nodes'][::-1], nodes)
+    else:
+        bearing_before = get_half_bearing_at_node(way['nodes'][:index + 1:-1], nodes)
+        bearing_after = get_half_bearing_at_node(way['nodes'][index:], nodes)
+        if bearing_before is None and bearing_after is None:
+            return None
+        elif bearing_after is None:
+            return bearing_before
+        elif bearing_before is None:
+            return bearing_after
+        elif abs(bearing_before - bearing_after) > constants.PARALLELISM_TOLERANCE:
+            return None
+        else:
+            return (bearing_after + bearing_before)/2.

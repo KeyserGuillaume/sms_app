@@ -52,5 +52,6 @@ def get_walking_itinerary_response(request):
         nB = matchObj.group(4)
         wayB = matchObj.group(5)
         cityB = cityA
-    print(get_walking_itinerary(nA, wayA, cityA, nB, wayB, cityB))
-    return ''
+    result = get_walking_itinerary(nA, wayA, cityA, nB, wayB, cityB)
+    print(result)
+    return result

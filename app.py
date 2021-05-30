@@ -13,11 +13,18 @@ twilio_sid = os.environ['TWILIO_ACCOUNT_SID']
 twilio_token = os.environ['TWILIO_AUTH_TOKEN']
 client = Client(twilio_sid, twilio_token)
 
+def send_message(msg, destination):
+    if msg and msg != '':
+        client.messages.create(from_=os.environ.get('TWILIO_NUMBER'),
+                      to=destination,
+                      body=msg)
+
 @app.route("/", methods=['POST'])
 def incoming_sms():
     """Send a dynamic reply to an incoming text message"""
     # Get the message the user sent our Twilio number
     body = request.values.get('Body', None)
+    phone_number = request.values.get('from', None)
     message = ''
 
     # Determine the right reply for this message
@@ -28,13 +35,12 @@ def incoming_sms():
         message = get_rain_response(body)
     elif body[:9] == 'Walk from':
         message = get_walking_itinerary_response(body)
-        
     if message and message != '':
-        resp = MessagingResponse()
-        resp.message(message)
-        return str(resp)
-    else:
-        return '', 200
+        send_message(message, phone_number)
+    # for long requests like routing, twilio may have stopped listening
+    # TODO set up a task queue or make hacks
+    # https://stackoverflow.com/questions/48994440/execute-a-function-after-flask-returns-response
+    return '', 200
 
 
 if __name__ == "__main__":

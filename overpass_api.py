@@ -12,8 +12,8 @@ def query_overpass(query):
     # curl -X POST -F 'Body=Walk from 156 avenue loubet, dunkerque to 168 avenue de la libération' localhost:5000
     # recorded_results = ['overpass_query_18:00:34.313883.json', 'overpass_query_18:00:51.380400.json', 'overpass_query_20:03:23.125522.json']
     # curl -X POST -F 'Body=Walk from 41 rue joseph jacquard, dunkerque to 52 rue pierre et marie curie' localhost:5000
-    recorded_results = ['overpass_query_17:47:21.136546.json', 'overpass_query_17:47:45.812696.json', 'overpass_query_17:47:48.224438.json']
-    # recorded_results = []
+    # recorded_results = ['overpass_query_17:47:21.136546.json', 'overpass_query_17:47:45.812696.json', 'overpass_query_17:47:48.224438.json']
+    recorded_results = []
     if overpass_index < len(recorded_results):
         with open(recorded_results[overpass_index]) as json_file:
             result = json.load(json_file)

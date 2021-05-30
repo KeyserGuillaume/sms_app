@@ -24,7 +24,7 @@ def incoming_sms():
     """Send a dynamic reply to an incoming text message"""
     # Get the message the user sent our Twilio number
     body = request.values.get('Body', None)
-    phone_number = request.values.get('from', None)
+    phone_number = os.environ.get('PHONE_NUMBER')
     message = ''
 
     # Determine the right reply for this message

@@ -86,32 +86,42 @@ def get_half_bearing_at_node(nodes_forming_way, nodes):
     sum_d = 0
     i = 0
     sum_bearing = 0
+    initial_bearing = get_bearing(nodes[nodes_forming_way[0]], nodes[nodes_forming_way[1]])
     while sum_d < constants.MIN_DISTANCE_FOR_WAY_BEARING and i < len(nodes_forming_way) - 1:
         d = get_flying_distance(nodes[nodes_forming_way[i]], nodes[nodes_forming_way[i+1]])
         sum_d += d
-        sum_bearing += d*get_bearing(nodes[nodes_forming_way[i]], nodes[nodes_forming_way[i+1]])
+        bearing = get_bearing(nodes[nodes_forming_way[i]], nodes[nodes_forming_way[i+1]])
+        if abs(initial_bearing - (bearing + 360)) < abs(initial_bearing - bearing):
+            bearing = bearing + 360
+        elif abs(initial_bearing - (bearing - 360)) < abs(initial_bearing - bearing):
+            bearing = bearing - 360
+        sum_bearing += d*bearing
         i += 1
     if sum_d < constants.MIN_DISTANCE_FOR_WAY_BEARING:
         return None
     else:
         return sum_bearing/sum_d % 180
 
-def get_bearing_at_node(way, node, nodes):
+def get_bearing_at_node(way, node, nodes, debug=False):
     index = way['nodes'].index(node['id'])
     if index == 0:
         return get_half_bearing_at_node(way['nodes'], nodes)
     elif index == len(way['nodes']) - 1:
         return get_half_bearing_at_node(way['nodes'][::-1], nodes)
     else:
-        bearing_before = get_half_bearing_at_node(way['nodes'][:index + 1:-1], nodes)
+        bearing_before = get_half_bearing_at_node(way['nodes'][index::-1], nodes)
         bearing_after = get_half_bearing_at_node(way['nodes'][index:], nodes)
         if bearing_before is None and bearing_after is None:
+            if debug:
+                print('no bearing')
             return None
         elif bearing_after is None:
             return bearing_before
         elif bearing_before is None:
             return bearing_after
         elif abs(bearing_before - bearing_after) > constants.PARALLELISM_TOLERANCE:
+            if debug:
+                print(bearing_before, bearing_after)
             return None
         else:
             return (bearing_after + bearing_before)/2.

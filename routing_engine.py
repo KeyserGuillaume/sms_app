@@ -12,6 +12,12 @@ class Marking:
         self.preceding_marking = preceding_marking     # Mark
         self.preceding_way = preceding_way              # int
 
+    def get_id(self):
+        return str(self.node_id) + '-' + \
+            str(self.sms_character_count) + '-' + \
+            str(self.distance_from_A)
+    
+    # used by PriorityQueue to deal with equalities
     def __gt__(self, other):
         return self.node_id > other.node_id
 
@@ -93,43 +99,61 @@ class RoutingEngine:
         
         return source
 
-    def should_write_line(self, previous_way, next_way, node, nodes):
+    def should_write_line(self, previous_way, next_way, node, nodes, debug=False):
         previous_name = get_way_name(previous_way)
         next_name = get_way_name(next_way)
         write_line = previous_name != next_name
         if not self.force_short_sms:
             return write_line
-        if write_line:
-            if get_way_name(previous_way) not in constants.DIFFICULT_WAYS:
-                bearing_before = get_bearing_at_node(previous_way, node, nodes)
-                bearing_after = get_bearing_at_node(next_way, node, nodes)
-                write_line = bearing_before is None or bearing_after is None \
-                    or abs(bearing_after - bearing_before) > constants.PARALLELISM_TOLERANCE
+        elif write_line and get_way_name(previous_way) not in constants.DIFFICULT_WAYS:
+            bearing_before = get_bearing_at_node(previous_way, node, nodes, debug)
+            bearing_after = get_bearing_at_node(next_way, node, nodes, debug)
+            write_line = bearing_before is None or bearing_after is None \
+                or abs(bearing_after - bearing_before) > constants.PARALLELISM_TOLERANCE
+            
+            if debug and write_line:
+                print(previous_name, next_name, bearing_before, bearing_after)
+        
         return write_line
+
+    def mark_id_is_dominated_by_other(self, mark_id, other):
+        node_id, sms_character_count, distance_from_A = mark_id.split('-')
+        node_id_other, sms_character_count_other, distance_from_A_other = other.split('-')
+        if self.force_short_sms:
+            return node_id == node_id_other and \
+                sms_character_count >= sms_character_count_other and \
+                distance_from_A >= distance_from_A_other
+        else:
+            return node_id == node_id_other and \
+                distance_from_A >= distance_from_A_other
 
     def mark_next_point(self, nodes, ways, prioque, markings):
         marking = prioque.get().item
-        mark_id = str(marking.node_id) + '-' + str(marking.preceding_way) if marking.preceding_way is not None else str(marking.node_id)
+        mark_id = marking.get_id()
         if mark_id in markings:
             return None
 
         node = nodes[marking.node_id]
+        for other_mark_id in node['mark_ids']:
+            if self.mark_id_is_dominated_by_other(mark_id, other_mark_id):
+                return None
+        node['mark_ids'].append(mark_id)
+        markings[mark_id] = marking
+        
         for link in node['neighbors']:
             # no going backwards to node of previous mark
             if marking.preceding_marking and link['node']['id'] == marking.preceding_marking.node_id:
                 continue
             new_sms_character_count = marking.sms_character_count
-            if marking.preceding_way and self.should_write_line(ways[marking.preceding_way], ways[link['way']], node, nodes):
+            if not marking.preceding_way or self.should_write_line(ways[marking.preceding_way], ways[link['way']], node, nodes):
                 new_sms_character_count += constants.ITINERARY_BASE_DIRECTION_CHARACTER_COUNT
                 new_sms_character_count += min(
                     constants.MAX_CHARS_PER_WAY,
-                    len(get_way_name(ways[marking.preceding_way])))
+                    len(get_way_name(ways[link['way']])))
             new_distance = marking.distance_from_A + link['distance']
             score = self.get_score(new_distance, new_sms_character_count)
             new_marking = Marking(link['node']['id'], new_distance, new_sms_character_count, marking, link['way'])
             prioque.put(PrioritizedItem(score, new_marking))
-
-        markings[mark_id] = marking
         return marking
 
     def get_node_path(self, marking, nodes):
@@ -137,18 +161,17 @@ class RoutingEngine:
         current_node = nodes[marking.node_id]
         i = 0
         current_marking = marking
-        while current_node and 'isSource' not in current_node and i < 1000:
+        while current_node and 'isSource' not in current_node and i < 3000:
             if current_marking.preceding_marking is None:
                 break
             current_node = nodes[current_marking.preceding_marking.node_id]
             current_marking = current_marking.preceding_marking
             path.append(current_node)
             i+=1 
-        if i == 1000:
-            print('big trouble')
+        if i == 3000:
+            print('big trouble, failed to reassemble path')
         if 'isSource' not in current_node:
-            print('where is source ?')
-        #print([x['id'] for x in path])
+            print('failed to reassemble path, could not find source')
         print(f'path has length {len(path)}')
         return path[::-1]
 
@@ -162,7 +185,7 @@ class RoutingEngine:
             link = [n for n in node1['neighbors'] if n['node']['id'] == node2['id']][0]
             way = ways[link['way']]
             name = get_way_name(way)
-            if len(directions) == 0 or (previous_way is not None and self.should_write_line(previous_way, way, node1, nodes)):
+            if len(directions) == 0 or self.should_write_line(previous_way, way, node1, nodes, False):
                 angle = get_angle(previous_node, node1, node2)
                 angle = (360 - angle) % 360
                 angle -= 180
@@ -181,6 +204,8 @@ class RoutingEngine:
         ways = {x['id']: x for x in elements if x['type'] == 'way'}
         print('nb of ways is ' + str(len(ways)))
         source = self.compute_neighbors(nodes, ways, pointA, pointB)
+        for node in list(nodes.values()):
+            node['mark_ids'] = []
         pointA['isSource'] = True
         markings = {}
         prioque = PriorityQueue()

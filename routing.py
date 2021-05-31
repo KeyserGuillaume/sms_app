@@ -30,6 +30,8 @@ def routing_engine_wrapper(map_data, pointA, pointB):
     else:
         engine = RoutingEngine(True, constants.SMS_TO_METER_PREFERENCE)
         itinerary = engine.dijkstra(map_data, pointA, pointB)
+        if itinerary['distance'] == 0:
+            return ''
         msg = get_message_from_itinerary(itinerary)
         return msg
 
